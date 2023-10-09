@@ -12,10 +12,12 @@ import atexit
 
 spmlib = cdll.LoadLibrary("PhotonSpectr.dll")
 
+
 class SpectrometerError(Exception):
     pass
 
-class SPM002control():
+
+class SPM002control:
     def __init__(self):
         self.deviceList = []
         self.serialList = []
@@ -32,7 +34,7 @@ class SPM002control():
         
     def populateDeviceList(self):
         indexTmp = None
-        if self.deviceIndex != None:
+        if self.deviceIndex is not None:
             indexTmp = self.deviceIndex
             self.closeDevice()
         self.deviceList = []
@@ -51,11 +53,11 @@ class SPM002control():
             self.deviceList.append(index.value)
             self.serialList.append(serial)
             spmlib.PHO_Close(index)
-        if indexTmp != None:
+        if indexTmp is not None:
             self.openDevice(indexTmp)
             
     def openDevice(self, index):
-        if self.deviceIndex != None:
+        if self.deviceIndex is not None:
             self.closeDevice()
         result = spmlib.PHO_Open(c_int(index))
         if result != 1:
@@ -74,14 +76,14 @@ class SPM002control():
         self.openDevice(index)
             
     def closeDevice(self):
-        if self.deviceIndex != None:
+        if self.deviceIndex is not None:
             result = spmlib.PHO_Close(c_int(self.deviceIndex))
             if result != 1:
                 raise SpectrometerError(''.join(('Could not close device, returned ', str(result))))
             self.deviceIndex = None
 
     def getStartEndPixels(self):
-        if self.deviceIndex != None:
+        if self.deviceIndex is not None:
             endP = c_int()
             startP = c_int()
             numPixels = c_int()
@@ -96,7 +98,7 @@ class SPM002control():
             self.numPixels = numPixels.value
             
     def getModel(self):
-        if self.deviceIndex != None:
+        if self.deviceIndex is not None:
             ml = create_string_buffer(13)
             result = spmlib.PHO_GetMl(self.deviceIndex, ml, 13)
             if result != 1:
@@ -104,7 +106,7 @@ class SPM002control():
             return ml.value
         
     def getMode(self):
-        if self.deviceIndex != None:
+        if self.deviceIndex is not None:
             mode = c_int()            
             result = spmlib.PHO_GetMode(self.deviceIndex, byref(mode))
             if result != 1:
@@ -112,13 +114,13 @@ class SPM002control():
             return mode.value
     
     def setMode(self, mode):
-        if self.deviceIndex != None:            
+        if self.deviceIndex is not None:
             result = spmlib.PHO_SetMode(self.deviceIndex, c_int(mode))
             if result != 1:
                 raise SpectrometerError(''.join(('Could not set mode, returned ', str(result))))
     
     def getTemperature(self):
-        if self.deviceIndex != None:
+        if self.deviceIndex is not None:
             temp = c_float()            
             result = spmlib.PHO_GetMode(self.deviceIndex, byref(temp))
             if result != 1:
@@ -126,7 +128,7 @@ class SPM002control():
             return temp.value
     
     def getLUT(self):
-        if self.deviceIndex != None:
+        if self.deviceIndex is not None:
             LUT = np.zeros(4)
             LUT = LUT.astype(np.float32)
             LUT_ct = LUT.ctypes.data_as(POINTER(c_float))
@@ -137,22 +139,22 @@ class SPM002control():
             self.LUT = LUT
         
     def constructWavelengths(self):
-        if self.LUT == None:
+        if self.LUT is None:
             self.getLUT()
-        if self.LUT != None:
+        if self.LUT is not None:
             x = np.arange(self.wavelengths.shape[0], dtype=np.float64)
             w = self.LUT[0] + self.LUT[1] * x + self.LUT[2] * x ** 2 + self.LUT[3] * x ** 3
             self.wavelengths = w
 
     def acquireSpectrum(self):
-        if self.deviceIndex != None:
+        if self.deviceIndex is not None:
             result = spmlib.PHO_Acquire(self.deviceIndex, 0, self.numPixels, self.CCD_ct)
 #            result = spmlib.PHO_Acquire(self.deviceIndex, self.startP, self.numPixels, self.CCD_ct)
             if result != 1:
                 raise SpectrometerError(''.join(('Could not acquire spectrum, returned ', str(result))))
 
     def getExposureTime(self):
-        if self.deviceIndex != None:
+        if self.deviceIndex is not None:
             exposure = c_float()
             result = spmlib.PHO_GetTime(self.deviceIndex, byref(exposure))
             if result != 1:
@@ -160,7 +162,7 @@ class SPM002control():
             return exposure.value
         
     def setExposureTime(self, exposure):
-        if self.deviceIndex != None:
+        if self.deviceIndex is not None:
             time = c_float(exposure)
             result = spmlib.PHO_SetTime(self.deviceIndex, time)
             if result != 1:
@@ -170,4 +172,8 @@ class SPM002control():
 if __name__ == '__main__':
     spm = SPM002control()    
 #    spm.populateDeviceList()
-#    spm.openDevice(1)  
+#    spm.openDevice(1)
+#     spm.constructWavelengths()
+#     spm.acquireSpectrum()
+#     import matplotlib.pyplot as mpl
+#     mpl.plot(spm.wavelengths, spm.CCD)

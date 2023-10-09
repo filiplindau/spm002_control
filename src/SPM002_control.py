@@ -8,7 +8,7 @@ from ctypes import *
 from struct import *
 import numpy as np
 import time
-import atexit
+# import atexit
 
 spmlib = windll.LoadLibrary("SPM002.dll")
 
