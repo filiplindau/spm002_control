@@ -5,7 +5,7 @@ Created on Aug 25, 2014
 '''
 import sys
 import PyTango
-import SPM002_control_new as spm
+import SPM002_control as spm
 import threading
 import time
 import numpy as np
@@ -199,13 +199,13 @@ class SpectrometerThread(threading.Thread):
 
         while self.stopStateThreadFlag == False:
             try:
-                self.spectrometer.closeDevice()
+                self.spectrometer.close_device()
             except Exception, e:
                 pass
 
             self.info_stream('Trying to connect...')
             try:                
-                self.spectrometer = spm.SPM002control()
+                self.spectrometer = spm.SPM002Control()
                 self.setState(PyTango.DevState.INIT)
                 self.info_stream('... connected')
                 break
@@ -244,7 +244,7 @@ class SpectrometerThread(threading.Thread):
                 s_status = ''.join((s_status, s))
                 self.status = s_status
                 self.info_stream(s)
-                self.spectrometer.constructWavelengths()
+                self.spectrometer.construct_wavelengths()
                 self.wavelengths = self.spectrometer.wavelengths
                 # Immediately push wavelength table to device server:
                 msg = SpectrometerDataMessage(self.serial, 'wavelengths', self.wavelengths)
@@ -272,7 +272,7 @@ class SpectrometerThread(threading.Thread):
             
         while self.stopStateThreadFlag == False:
             try:
-                self.spectrometer.closeDevice()
+                self.spectrometer.close_device()
                 self.openSpectrometer()
                 
                 self.setState(prevState)
@@ -293,7 +293,7 @@ class SpectrometerThread(threading.Thread):
         """
         self.info_stream('Entering offHandler')
         try:
-            self.spectrometer.closeDevice()
+            self.spectrometer.close_device()
         except Exception, e:
             self.error_stream(''.join(('Could not disconnect from spectrometer, ', str(e))))
                 
@@ -321,7 +321,7 @@ class SpectrometerThread(threading.Thread):
                 break
                         
             try:
-                expTime = self.spectrometer.getExposureTime() * 1e-3
+                expTime = self.spectrometer.get_exposure_time() * 1e-3
             except Exception, e:
                 self.error_stream('Error reading device')
                 self.setState(PyTango.DevState.FAULT)
@@ -344,7 +344,7 @@ class SpectrometerThread(threading.Thread):
         self.info_stream(s)
         newSpectrumTimestamp = time.time()
         oldSpectrumTimestamp = time.time()
-        self.spectrumData = self.spectrometer.CCD
+        self.spectrumData = self.spectrometer.spectrum
         nextUpdateTime = time.time()
         while self.stopStateThreadFlag == False:
             if self.state not in handledStates:
@@ -360,8 +360,8 @@ class SpectrometerThread(threading.Thread):
                 t = time.time()
 #                self.debug_stream(''.join(("In onHandler()... time ", str(t), ", next update ", str(nextUpdateTime))))
                 if t > nextUpdateTime:
-                    self.spectrometer.acquireSpectrum()
-                    newSpectrum = self.spectrometer.CCD                
+                    self.spectrometer.acquire_spectrum()
+                    newSpectrum = self.spectrometer.spectrum
                     newSpectrumTimestamp = time.time()
                     d = np.abs(newSpectrum - self.spectrumData).sum()
                     if d == 0:                    
@@ -421,9 +421,9 @@ class SpectrometerThread(threading.Thread):
         """
         # If the device was closed, we open it again
         self.debug_stream('Entering openSpectrometer')
-        if self.spectrometer.deviceIndex == None:            
+        if self.spectrometer.device_index == None:
             try:
-                self.spectrometer.openDeviceIndex(self.spectrometerIndex)
+                self.spectrometer.open_device_index(self.spectrometerIndex)
                 self.debug_stream(''.join(('openSpectrometer: device', str(self.serial), ' opened')))
             except Exception, e:
                 self.error_stream(''.join(('Could not open device ', str(self.serial), str(e))))
@@ -452,7 +452,7 @@ class SpectrometerThread(threading.Thread):
 
         if forceSet == True:
             try:
-                self.spectrometer.setExposureTime(int(self.expTime * 1e3))  # expTime is in ms, the spectrometer excpects us
+                self.spectrometer.set_exposure_time(int(self.expTime * 1e3))  # expTime is in ms, the spectrometer excpects us
             except Exception, e:
                 self.set_state(PyTango.DevState.FAULT)
                 self.set_status(''.join(('Could not set exposure time', str(e))))
@@ -469,7 +469,7 @@ class SpectrometerThread(threading.Thread):
         """
         if self.state not in [PyTango.DevState.INIT, PyTango.DevState.UNKNOWN]:
             try:
-                self.expTime = self.spectrometer.getExposureTime() * 1e-3
+                self.expTime = self.spectrometer.get_exposure_time() * 1e-3
             except Exception, e:
                 self.error_stream('Error reading device')
                 self.setState(PyTango.DevState.FAULT)
@@ -533,7 +533,7 @@ class SPM002MasterDS(PyTango.Device_4Impl):
         except:
             pass
         
-        self.controlSpectrometer = spm.SPM002control()
+        self.controlSpectrometer = spm.SPM002Control()
         
         try:
             self.spectrometerList
@@ -569,8 +569,8 @@ class SPM002MasterDS(PyTango.Device_4Impl):
         self.info_stream('In enumerateSpectrometers')
         self.set_state(PyTango.DevState.INIT)
         self.stopSpectrometerThreads()
-        self.controlSpectrometer.populateDeviceList()
-        self.spectrometerList = self.controlSpectrometer.serialList
+        self.controlSpectrometer.populate_device_list()
+        self.spectrometerList = self.controlSpectrometer.serial_list
         self.info_stream(''.join(('Found ', str(self.spectrometerList.__len__()), ' spectrometers.')))
         for ind, spec in enumerate(self.spectrometerList):
             if self.spectrometerDict.has_key(spec) == False:
