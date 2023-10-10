@@ -25,12 +25,12 @@ import atexit
 log_format = "%(asctime)s - %(levelname)s - %(funcName)s - %(message)s"
 
 # Set up the logging configuration using basicConfig
-logging.basicConfig(level=logging.DEBUG, format=log_format)
+logging.basicConfig(level=logging.INFO, format=log_format)
 
 logger = logging.getLogger()
 
 logger.debug("Loading dll")
-spmlib = cdll.LoadLibrary("PhotonSpectr.dll")
+spmlib = cdll.LoadLibrary("./PhotonSpectr.dll")
 
 
 class SpectrometerError(Exception):
@@ -39,6 +39,10 @@ class SpectrometerError(Exception):
 
 class SPM002Control:
     def __init__(self, populate_devices=True):
+        """
+        Create SPM002 control device.
+        If populate_devices is True the usb bus is checked for spectrometers immediately.
+        """
         self.device_list = []
         self.serial_list = []
         self.device_index = None
@@ -86,6 +90,9 @@ class SPM002Control:
             self.open_device(index_tmp)
             
     def open_device(self, index):
+        """
+        Open a spectrometer device based on its index in the enumerated list of attached devices.
+        """
         logger.info(f"Opening device with index {index}")
         if self.device_index is not None:
             self.close_device()
@@ -99,12 +106,16 @@ class SPM002Control:
         self.open_device(index)
         
     def open_device_serial(self, serial):
+        """
+        Open a spectrometer device based on its serial number. If the serial is not found in the list of attached
+        devices an error is raised.
+        """
         with self.hw_lock:
             try:
                 index = self.serial_list.index(serial)
     #            print 'Opening device', index
             except ValueError:
-                raise SpectrometerError(''.join(('No device ', str(serial), ' found in list of connected spectrometers.')))
+                raise SpectrometerError(f"No device {serial} found in list of connected spectrometers.")
         self.open_device(index)
             
     def close_device(self):
@@ -213,6 +224,9 @@ class SPM002Control:
             self.spectrum = spectrum
 
     def get_exposure_time(self):
+        """
+        Get spectrometer exposure time in ms."
+        """
         if self.device_index is None:
             raise SpectrometerError("Not connected to device")
         with self.hw_lock:
@@ -223,7 +237,10 @@ class SPM002Control:
         return exposure.value
         
     def set_exposure_time(self, exposure):
-        logger.info(f"Setting exposure time {exposure:.1e} s")
+        """
+        Set spectrometer exposure time in ms.
+        """
+        logger.info(f"Setting exposure time {exposure:.1e} ms")
         if self.device_index is None:
             raise SpectrometerError("Not connected to device")
         with self.hw_lock:
