@@ -64,14 +64,68 @@ class SPM002DS(Device):
                             unit="nm",
                             doc="Wavelength array")
 
-    Model = attribute(label="Model",
-                            dtype=str,
+    # PeakROI = attribute(label="Peak ROI",
+    #                     dtype=(float,),
+    #                     access=pt.AttrWriteType.READ_WRITE,
+    #                     max_dim_x=2,
+    #                     fget="get_peakroi",
+    #                     fset="set_peakroi",
+    #                     unit="nm",
+    #                     doc="Region of interest for peak calculations [lambda_min, lambda_max]")
+
+    SpectrumROI = attribute(label="Spectrum ROI",
+                            dtype=(int,),
                             access=pt.AttrWriteType.READ,
-                            fget="get_model",
-                            doc="Spectrometer model")
+                            min_value=0,
+                            max_dim_x=3648,
+                            fget="get_spectrum_roi",
+                            doc="Spectrum trace in ROI")
+
+    WavelengthsROI = attribute(label="Wavelengths ROI",
+                               dtype=(float,),
+                               access=pt.AttrWriteType.READ,
+                               max_dim_x=3648,
+                               fget="get_wavelengths_roi",
+                               unit="nm",
+                               doc="Wavelength array in ROI")
+
+    PeakWavelength = attribute(label="Peak wavelength",
+                               dtype=float,
+                               access=pt.AttrWriteType.READ,
+                               unit="nm",
+                               fget="get_peakwavelength",
+                               doc="Wavelength of the most prominent peak found in the ROI")
+
+    PeakWidth = attribute(label="Peak width",
+                          dtype=float,
+                          access=pt.AttrWriteType.READ,
+                          unit="nm",
+                          fget="get_peakwidth",
+                          doc="FWHM width of the most prominent peak found in the ROI")
+
+    PeakEnergy = attribute(label="Peak energy",
+                           dtype=float,
+                           access=pt.AttrWriteType.READ,
+                           unit="a.u.",
+                           fget="get_peakenergy",
+                           doc="Energy inside the most prominent peak found in the ROI")
+
+    Model = attribute(label="Model",
+                      dtype=str,
+                      access=pt.AttrWriteType.READ,
+                      fget="get_model",
+                      doc="Spectrometer model")
 
     Serial = device_property(dtype=int,
                              doc="Spectrometer serial number")
+
+    PeakROI_min = device_property(dtype=float,
+                                  doc="Region of interest for peak calculations lambda_min",
+                                  default_value=700)
+
+    PeakROI_max = device_property(dtype=float,
+                                  doc="Region of interest for peak calculations lambda_max",
+                                  default_value=900)
 
     def __init__(self, klass, name):
         self.spectrum_data = None
@@ -79,6 +133,13 @@ class SPM002DS(Device):
         self.exposuretime_data = None
         self.updatetime_data = None
         self.model_data = None
+        self.peak_width_data = None
+        self.peak_energy_data = None
+        self.peak_wavelength_data = None
+        self.spectrum_roi_data = None
+        self.wavelengths_roi_data = None
+        self.peak_roi_data = None
+        self.peak_roi_index = np.array([0, 3647])
 
         self.spectrometer_dev: spm.SPM002Control = None
 
@@ -138,6 +199,7 @@ class SPM002DS(Device):
             self.error_stream(f"Could not construct wavelengths. Error {e}")
             self.set_status(f"Could not construct wavelengths. Error {e}")
             return
+        self.set_peakroi((self.PeakROI_min, self.PeakROI_max))
 
         try:
             self.exposuretime_data = self.spectrometer_dev.get_exposure_time()
@@ -164,6 +226,14 @@ class SPM002DS(Device):
     def get_wavelengths(self):
         return self.wavelengths_data
 
+    def get_spectrum_roi(self):
+        with self.attr_lock:
+            spectrum_data = np.copy(self.spectrum_roi_data)
+        return spectrum_data
+
+    def get_wavelengths_roi(self):
+        return self.wavelengths_roi_data
+
     def set_exposuretime(self, value):
         self.spectrometer_dev.set_exposure_time(value)
         self.exposuretime_data = value
@@ -177,8 +247,35 @@ class SPM002DS(Device):
     def get_updatetime(self):
         return self.updatetime_data
 
+    def set_peakroi(self, value):
+        self.info_stream(f"Setting PeakROI to {value}")
+        with self.attr_lock:
+            self.peak_roi_data = value
+            if self.wavelengths_data is None:
+                return
+            roi1 = np.abs(self.wavelengths_data - self.peak_roi_data[0]).argmin()
+            roi2 = np.abs(self.wavelengths_data - self.peak_roi_data[1]).argmin()
+            self.peak_roi_index = np.array([min(roi1, roi2), max([roi1, roi2])])
+            try:
+                self.wavelengths_roi_data = self.wavelengths_data[self.peak_roi_index[0]: self.peak_roi_index[1]]
+                self.spectrum_roi_data = self.spectrum_data[self.peak_roi_index[0]: self.peak_roi_index[1]]
+            except TypeError as e:
+                self.error_stream(f"Could not set roi data: {e}")
+
+    def get_peakroi(self):
+        return self.peak_roi_data
+
     def get_model(self):
         return self.model_data
+
+    def get_peakwavelength(self):
+        return self.peak_wavelength_data
+
+    def get_peakwidth(self):
+        return self.peak_width_data
+
+    def get_peakenergy(self):
+        return self.peak_energy_data
 
     def update_spectrum(self):
         last_update_time = time.time()
@@ -189,8 +286,66 @@ class SPM002DS(Device):
                 with self.attr_lock:
                     self.spectrum_data = self.spectrometer_dev.get_spectrum()
                     self.spectrometer_dev.acquire_spectrum()
+                    self.spectrum_roi_data = self.spectrum_data[self.peak_roi_index[0]: self.peak_roi_index[1]]
+                self.calculate_spectrum_parameters()
                 last_update_time = time.time()
             time.sleep(0.02)
+
+    def calculate_spectrum_parameters(self):
+        self.debug_stream('Entering calculate_spectrum_parameters')
+        t0 = time.time()
+        if self.spectrum_roi_data is None:
+            return
+
+
+        with self.attr_lock:
+            sp = np.copy(self.spectrum_roi_data)
+
+        if sp.size != 1:
+            # Start by median filtering to remove spikes
+            m = np.median(np.vstack((sp[6:], sp[5:-1], sp[4:-2], sp[3:-3], sp[2:-4], sp[1:-5], sp[0:-6])), axis=0)
+            noise_floor = np.mean(m[0:10])
+            peak_center_ind = m.argmax()
+            half_max = (m[peak_center_ind] + noise_floor) / 2
+            # Detect zero crossings to this half max to determine the FWHM
+            half_ind = np.where(np.diff(np.sign(m - half_max)))[0]
+            half_ind_reduced = half_ind[np.abs(half_ind - peak_center_ind).argsort()[0:2]]
+            self.debug_stream('In calculate_spectrum_parameters: halfInd done')
+            # Check where the signal is below 1.2*noiseFloor:
+            noise_ind = np.where(sp < 1.2 * noise_floor)[0]
+            if noise_ind.shape[0] < 3:
+                noise_ind = np.array(1, sp.shape[0] - 1)
+            # Index where the peak starts in the vector noiseInd:
+            peak_edge_ind = abs(noise_ind - peak_center_ind).argmin()
+            peak_edge_ind = max(peak_edge_ind, 1)
+            peak_edge_ind = min(peak_edge_ind, noise_ind.shape[0] - 2)
+
+            self.debug_stream('In calculate_spectrum_parameters: peakInd done')
+            # The peak is then located between [peakEdgeInd - 1] and [peakEdgeInd + 1]:
+            peak_ind_min = max(noise_ind[peak_edge_ind - 1], 0)
+            peak_ind_max = min(noise_ind[peak_edge_ind + 1], noise_ind.shape[0] - 1)
+            peak_data = sp[peak_ind_min: peak_ind_max]
+
+            with self.attr_lock:
+                self.debug_stream('In calculate_spectrum_parameters: peakData done')
+                peak_wavelengths = self.wavelengths_roi_data[peak_ind_min: peak_ind_max]
+                try:
+                    w = self.wavelengths_roi_data[3:-3]
+                    spN = (m - noise_floor * 1.1).clip(0)
+                    peak_energy = 1560 * 1e-6 * np.trapz(spN, w) / self.exposuretime_data
+                    peak_width = np.abs(np.diff(self.wavelengths_roi_data[half_ind_reduced]))
+                    peak_center = np.trapz(spN * w) / np.trapz(spN)
+                except Exception as e:
+                    self.error_stream(f"In calculate_spectrum_parameters: Error calculating peak parameters: {e}")
+                    peak_energy = 0.0
+                    peak_width = 0.0
+                    peak_center = 0.0
+                self.debug_stream('In calculate_spectrum_parameters: peakCenter done')
+                self.peak_energy_data = peak_energy
+                self.peak_width_data = peak_width
+                self.peak_wavelength_data = peak_center
+
+                self.debug_stream(f"In calculate_spectrum_parameters: computation time {time.time() - t0:.2} s")
 
     def stop_thread(self):
         if self.thread is not None:
